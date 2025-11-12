@@ -85,7 +85,7 @@ class Spider:
                 # 检查是否稳定
                 if current_ids.issubset(previous_ids):
                     self.logger.info(f"    结果一致")
-                    if attempt >= 3:
+                    if attempt >= 2:
                         self.logger.info(f"  ✓ 结果已稳定，共 {len(all_results)} 套房源")
                         break
                 else:

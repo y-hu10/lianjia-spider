@@ -42,7 +42,11 @@ class Database:
             TOTAL_PRICE    TEXT                     NOT NULL,
             UNIT_PRICE     TEXT                     NOT NULL,
             DATE_PRICE     TEXT                     NOT NULL,
-            REGION         TEXT                     NOT NULL
+            REGION         TEXT                     NOT NULL,
+            QUOTEDATE      TEXT,
+            LASTTRADEDATE  TEXT,
+            VIEWNUM        INT,
+            FOLLOWNUM      INT
         );
         ''')
 
@@ -61,7 +65,11 @@ class Database:
             UNIT_PRICE     TEXT                     NOT NULL,
             DATE_PRICE     TEXT                     NOT NULL,
             DATE           TEXT                     NOT NULL,
-            REGION         TEXT                     NOT NULL
+            REGION         TEXT                     NOT NULL,
+            QUOTEDATE      TEXT,
+            LASTTRADEDATE  TEXT,
+            VIEWNUM        INT,
+            FOLLOWNUM      INT
         );
         ''')
     

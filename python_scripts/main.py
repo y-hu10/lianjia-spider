@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-重构后的 main.py - 使用日志系统
+支持板块差异化价格段配置的 main.py
 """
 
 from spider import Spider
@@ -27,9 +27,31 @@ def load_config(config_path='config/config.json'):
         raise
 
 
+def get_price_ranges_for_locale(config, locale):
+    """
+    获取指定板块的价格段配置
+    
+    Args:
+        config: 配置字典
+        locale: 板块名称
+        
+    Returns:
+        该板块对应的价格段列表
+    """
+    # 检查是否有针对该板块的特殊配置
+    locale_specific = config.get('locale_specific_price_ranges', {})
+    
+    if locale in locale_specific:
+        return locale_specific[locale]
+    else:
+        # 使用默认价格段
+        return config['price_ranges']
+
+
 def fetch_all_data(config):
     """
     根据配置批量抓取所有区域和价格段的数据
+    支持板块差异化价格段配置
     
     Returns:
         所有房源数据的列表（已去重）
@@ -39,7 +61,6 @@ def fetch_all_data(config):
     host = config['host']
     locales = config['locales']
     types = config.get('types', ['l2l3l4'])
-    price_ranges = config['price_ranges']
     
     # 稳定性配置
     stability = config.get('stability', {})
@@ -48,19 +69,39 @@ def fetch_all_data(config):
     
     all_houses = {}  # 使用字典去重，key 为 house_id
     
-    total_tasks = len(locales) * len(types) * len(price_ranges)
+    # 计算总任务数（考虑不同板块的价格段数量）
+    total_tasks = 0
+    for locale in locales:
+        price_ranges = get_price_ranges_for_locale(config, locale)
+        total_tasks += len(types) * len(price_ranges)
+    
     current_task = 0
     
     logger.info("=" * 60)
     logger.info("开始批量抓取:")
-    logger.info(f"  区域: {len(locales)} 个 - {locales}")
+    logger.info(f"  区域数: {len(locales)} 个")
     logger.info(f"  类型: {len(types)} 个 - {types}")
-    logger.info(f"  价格段: {len(price_ranges)} 个")
     logger.info(f"  总任务数: {total_tasks}")
     logger.info(f"  稳定性要求: 最多 {max_attempts} 次尝试, {threshold} 次一致")
+    
+    # 统计特殊配置的板块
+    locale_specific = config.get('locale_specific_price_ranges', {})
+    if locale_specific:
+        logger.info(f"  特殊价格段板块: {len(locale_specific)} 个")
+        for loc in locale_specific:
+            logger.info(f"    - {loc}: {len(locale_specific[loc])} 个价格段")
+    
     logger.info("=" * 60)
     
     for locale in locales:
+        # 获取该板块的价格段配置
+        price_ranges = get_price_ranges_for_locale(config, locale)
+        
+        # 显示该板块使用的价格段信息
+        if locale in locale_specific:
+            logger.info("")
+            logger.info(f"📍 板块 [{locale}] 使用特殊价格段配置 ({len(price_ranges)} 段)")
+        
         for house_type in types:
             for price_range in price_ranges:
                 current_task += 1
@@ -70,6 +111,7 @@ def fetch_all_data(config):
                 logger.info("")
                 logger.info(f"[{current_task}/{total_tasks}] 任务:")
                 logger.info(f"  区域: {locale}")
+                logger.info(f"  类型: {house_type}")
                 logger.info(f"  价格: {min_price}-{max_price}万")
                 
                 try:
@@ -147,7 +189,7 @@ def process_houses(data, db, config, date):
                 
             else:
                 # 已存在的房源，检查价格变动
-                old_date_price = json.loads(old_data[0][-1])
+                old_date_price = json.loads(old_data[0][10])
                 
                 if date not in old_date_price:
                     old_date_price[date] = [
@@ -200,7 +242,8 @@ def process_houses(data, db, config, date):
                     'house_total_price': del_data[8],
                     'house_unit_price': del_data[9],
                     'house_date_price': del_data[10],
-                    'date': date
+                    'date': date,
+                    'house_region': del_data[11]
                 })
                 
                 db.deleteHouse(item[0])
@@ -260,7 +303,7 @@ def main():
     # 初始化日志系统
     setup_logger(
         log_dir=sys.path[0] + '/../logs',
-        log_level=logging.INFO,  # 可改为 logging.DEBUG 查看详细信息
+        log_level=logging.INFO,
         console_output=True
     )
     
@@ -271,7 +314,7 @@ def main():
         config_path = sys.path[0] + '/../config/config.json'
         config = load_config(config_path)
         
-        # 批量抓取数据
+        # 批量抓取数据（支持板块差异化价格段）
         all_data = fetch_all_data(config)
         
         if not all_data:
