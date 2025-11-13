@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 支持板块差异化价格段配置的 main.py
+增加SELLOUT表房源复活逻辑
 """
 
 from spider import Spider
@@ -148,7 +149,7 @@ def fetch_all_data(config):
 
 def process_houses(data, db, config, date):
     """
-    处理房源数据：新增、变动、减少
+    处理房源数据：新增、变动、减少、复活
     
     Returns:
         统计信息字典
@@ -161,7 +162,9 @@ def process_houses(data, db, config, date):
         'change_count': 0,
         'change_list': [],
         'delete_count': 0,
-        'delete_list': []
+        'delete_list': [],
+        'revive_count': 0,
+        'revive_list': []
     }
     
     logger.info("")
@@ -173,23 +176,69 @@ def process_houses(data, db, config, date):
             logger.debug(f"  已处理 {idx}/{len(data)} 套房源...")
         
         try:
-            old_data = list(db.selectHouse(house['house_id']))
+            house_id = house['house_id']
+            
+            # 先查询HOUSE表
+            old_data = list(db.selectHouse(house_id))
             
             if len(old_data) == 0:
-                # 新增房源
-                stats['new_count'] += 1
-                url = f"{config['host']}/ershoufang/{house['house_id']}.html"
-                stats['new_list'].append(url)
+                # HOUSE表中不存在，检查是否在SELLOUT表中
+                sellout_data = list(db.selectSellOut(house_id))
                 
-                house['house_date_price'] = json.dumps({
-                    date: [house['house_total_price'], house['house_unit_price']]
-                })
-                db.insertHouse(house)
-                logger.debug(f"  新增房源: {house['house_id']} - {house['house_location']}")
+                if len(sellout_data) > 0:
+                    # 房源复活！从SELLOUT表恢复
+                    stats['revive_count'] += 1
+                    url = f"{config['host']}/ershoufang/{house_id}.html"
+                    stats['revive_list'].append(url)
+                    
+                    # 获取历史价格数据
+                    old_date_price = json.loads(sellout_data[0][10])  # DATE_PRICE字段
+                    
+                    # 检查价格是否有变动
+                    sorted_dates = sorted(old_date_price.keys())
+                    last_date = sorted_dates[-1] if sorted_dates else None
+                    price_changed = False
+                    
+                    if last_date:
+                        old_price = old_date_price[last_date]
+                        new_price = [house['house_total_price'], house['house_unit_price']]
+                        if old_price != new_price:
+                            price_changed = True
+                            logger.info(f"  🔄 复活且变价: {house_id} - {old_price} → {new_price}")
+                            stats['change_count'] += 1
+                            stats['change_list'].append(url)
+                    
+                    # 添加新的日期价格
+                    old_date_price[date] = [
+                        house['house_total_price'],
+                        house['house_unit_price']
+                    ]
+                    house['house_date_price'] = json.dumps(old_date_price)
+                    
+                    # 插入回HOUSE表
+                    db.insertHouse(house)
+                    
+                    # 从SELLOUT表删除
+                    db.deleteSellOut(house_id)
+                    
+                    if not price_changed:
+                        logger.info(f"  🔄 复活: {house_id} - {house['house_location']} (价格未变)")
+                    
+                else:
+                    # 真正的新增房源
+                    stats['new_count'] += 1
+                    url = f"{config['host']}/ershoufang/{house_id}.html"
+                    stats['new_list'].append(url)
+                    
+                    house['house_date_price'] = json.dumps({
+                        date: [house['house_total_price'], house['house_unit_price']]
+                    })
+                    db.insertHouse(house)
+                    logger.debug(f"  新增房源: {house_id} - {house['house_location']}")
                 
             else:
                 # 已存在的房源，检查价格变动
-                old_date_price = json.loads(old_data[0][10])
+                old_date_price = json.loads(old_data[0][10])  # DATE_PRICE字段（索引10）
                 
                 if date not in old_date_price:
                     old_date_price[date] = [
@@ -205,12 +254,12 @@ def process_houses(data, db, config, date):
                         last_date = sorted_dates[-2]
                         if old_date_price[last_date] != old_date_price[date]:
                             stats['change_count'] += 1
-                            url = f"{config['host']}/ershoufang/{house['house_id']}.html"
+                            url = f"{config['host']}/ershoufang/{house_id}.html"
                             stats['change_list'].append(url)
                             
                             old_price = old_date_price[last_date]
                             new_price = old_date_price[date]
-                            logger.info(f"  价格变动: {house['house_id']} - {old_price} → {new_price}")
+                            logger.info(f"  💰 价格变动: {house_id} - {old_price} → {new_price}")
         
         except Exception as e:
             logger.error(f"  处理房源 {house.get('house_id', 'unknown')} 失败: {e}", exc_info=True)
@@ -247,7 +296,7 @@ def process_houses(data, db, config, date):
                 })
                 
                 db.deleteHouse(item[0])
-                logger.debug(f"  售出房源: {item[0]}")
+                logger.debug(f"  ❌ 售出房源: {item[0]}")
     
     except Exception as e:
         logger.error(f"  处理售出房源失败: {e}", exc_info=True)
@@ -267,6 +316,7 @@ def print_summary(date, stats):
     logger.info("")
     logger.info("📊 统计摘要:")
     logger.info(f"  新增: {stats['new_count']} 套")
+    logger.info(f"  复活: {stats['revive_count']} 套 (从已售出恢复)")
     logger.info(f"  变动: {stats['change_count']} 套")
     logger.info(f"  减少: {stats['delete_count']} 套")
     
@@ -277,6 +327,14 @@ def print_summary(date, stats):
             logger.info(f"  {i}. {url}")
         if len(stats['new_list']) > 5:
             logger.info(f"  ... 还有 {len(stats['new_list']) - 5} 套")
+    
+    if stats['revive_list']:
+        logger.info("")
+        logger.info("🔄 复活房源 (重新上架):")
+        for i, url in enumerate(stats['revive_list'][:5], 1):
+            logger.info(f"  {i}. {url}")
+        if len(stats['revive_list']) > 5:
+            logger.info(f"  ... 还有 {len(stats['revive_list']) - 5} 套")
     
     if stats['change_list']:
         logger.info("")

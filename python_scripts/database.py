@@ -150,3 +150,12 @@ class Database:
     def selectSellOut(self, house_id):
         """查询已售出房源 - 修复SQL注入漏洞"""
         return self.c.execute("SELECT * FROM SELLOUT WHERE ID=?", (house_id,))
+
+    def deleteSellOut(self, house_id):
+        """
+        从SELLOUT表删除房源（用于房源复活）
+        
+        Args:
+            house_id: 房源ID
+        """
+        self.c.execute("DELETE FROM SELLOUT WHERE ID=?", (house_id,))
