@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-增强版爬虫 - 反反爬虫策略
+修复Cookie更新逻辑的爬虫
 """
 
 import requests
@@ -18,34 +18,17 @@ from improved_block_detection import BlockDetector
 
 
 class AntiBlockSpider:
-    """反反爬虫增强版爬虫"""
+    """反反爬虫增强版爬虫 - 修复Cookie更新"""
     
-    # 用户代理池
     USER_AGENTS = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     ]
     
     def __init__(self, host, locale, t='l2', min_price=0, max_price=0, 
                  use_proxy=False, min_delay=3, max_delay=8):
-        """
-        初始化爬虫
-        
-        Args:
-            host: 主机地址
-            locale: 区域
-            t: 类型
-            min_price: 最低价格
-            max_price: 最高价格
-            use_proxy: 是否使用代理
-            min_delay: 最小延迟（秒）
-            max_delay: 最大延迟（秒）
-        """
+        """初始化爬虫"""
         self.base_url = host
         self.ershoufang_url = self.base_url + '/ershoufang'
         self.locale = locale
@@ -60,17 +43,26 @@ class AntiBlockSpider:
         self.request_count = 0
         self.last_request_time = 0
         
+        # ⭐ 关键修复：在初始化时获取全局Cookie管理器实例
+        self.cookie_manager = get_cookie_manager('config/cookies.json')
+        
         # 配置会话
         self.session = self._create_session()
+        
+        # Cookie失效计数器
+        self.cookie_fail_count = 0
+        self.max_cookie_fails = 3
+        
+        # 封禁检测器
+        self.block_detector = BlockDetector()
     
     def _create_session(self):
         """创建带重试机制的会话"""
         session = requests.Session()
         
-        # 配置重试策略
         retry_strategy = Retry(
             total=3,
-            backoff_factor=2,  # 指数退避: 2, 4, 8秒
+            backoff_factor=2,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["GET"]
         )
@@ -95,64 +87,132 @@ class AntiBlockSpider:
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
             "Cache-Control": "max-age=0",
-            "DNT": "1",  # Do Not Track
+            "DNT": "1",
             "Sec-Fetch-Dest": "document",
             "Sec-Fetch-Mode": "navigate",
             "Sec-Fetch-Site": "none",
             "Sec-Fetch-User": "?1",
         }
         
-        # 随机添加Referer（模拟从其他页面跳转）
         if self.request_count > 0 and random.random() > 0.3:
             headers["Referer"] = f"{self.base_url}/ershoufang/{self.locale}/"
         
         return headers
     
-    def _get_cookies(self):
+    def _get_cookies(self, force_reload=False):
         """
-        获取Cookie（应该从配置文件或环境变量读取）
-        ⚠️ 注意：这里的Cookie需要定期更新！
+        ⭐ 关键修复：使用实例的cookie_manager，支持强制重新加载
+        
+        Args:
+            force_reload: 是否强制从源重新加载cookie
         """
-        cookie_mgr = get_cookie_manager('config/cookies.json')
-        cookies = cookie_mgr.get_cookies()
-
-        # 检查有效性
-        if not cookie_mgr.is_valid():
-            print("Cookie无效，请更新！")
+        cookies = self.cookie_manager.get_cookies(force_reload=force_reload)
+        
+        # 验证cookie有效性
+        if not self.cookie_manager.is_valid():
+            self.logger.warning("⚠️ Cookie可能无效或不完整")
+            self.logger.info(f"当前Cookie: {self.cookie_manager.get_cookie_summary()}")
+        
         return cookies
+
+    def _check_blocked(self, html: str, url: str = "") -> Tuple[bool, str, Dict]:
+        """
+        检查是否被封禁（使用改进的检测器）
+
+        Returns:
+            (是否被封禁, 原因, 详细分析)
+        """
+
+        is_blocked, reason = self.block_detector.check_blocked(html, url)
+
+        analysis = {}
+        if is_blocked:
+            analysis = self.block_detector.analyze_block_page(html)
+
+        return is_blocked, reason, analysis
     
-    def _get_proxy(self):
+    def _handle_blocked_response(self, html: str, url: str, attempt: int) -> bool:
         """
-        获取代理（如果启用）
-        需要配置代理池
+        ⭐ 新增：专门处理被封禁的响应
+        
+        Returns:
+            是否应该继续重试
         """
-        if not self.use_proxy:
-            return None
+        is_blocked, reason, analysis = self._check_blocked(html, url)
         
-        # TODO: 实现代理池
-        # 可以使用：
-        # 1. 付费代理服务（如：阿布云、快代理）
-        # 2. 自建代理池
-        # 3. 免费代理（不推荐，质量差）
+        if not is_blocked:
+            return False  # 没有被封禁，不需要特殊处理
         
-        proxies = {
-            'http': 'http://proxy_ip:port',
-            'https': 'http://proxy_ip:port',
-        }
-        return proxies
+        self.logger.error(f"  [封禁检测] {reason}")
+        
+        # 打印详细分析
+        block_type = analysis.get('block_type', 'unknown')
+        
+        if block_type != 'unknown':
+            self.logger.error(f"  [封禁类型] {block_type}")
+        
+        if analysis.get('captcha_type'):
+            self.logger.error(f"  [验证码类型] {analysis['captcha_type']}")
+        
+        if analysis.get('error_message'):
+            self.logger.error(f"  [错误信息] {analysis['error_message']}")
+        
+        # 根据封禁类型采取不同策略
+        if block_type == 'captcha':
+            self.logger.error("=" * 60)
+            self.logger.error("🚫 检测到验证码，需要人工处理！")
+            self.logger.error("=" * 60)
+            self.logger.error("请执行以下步骤：")
+            self.logger.error("1. 打开浏览器访问：" + url)
+            self.logger.error("2. 完成验证码验证")
+            self.logger.error("3. 按F12打开开发者工具 -> Application -> Cookies")
+            self.logger.error("4. 复制所有Cookie并更新到 config/cookies.json")
+            self.logger.error("5. 重新运行程序")
+            self.logger.error("=" * 60)
+            
+            self.cookie_fail_count += 1
+            
+            if self.cookie_fail_count >= self.max_cookie_fails:
+                self.logger.critical("Cookie连续失败次数过多，终止运行")
+                raise Exception("Cookie失效，需要手动更新")
+            
+            # 验证码情况下等待更长时间
+            penalty = random.uniform(60, 120)
+            self.logger.warning(f"等待 {penalty:.0f}秒 后重试...")
+            time.sleep(penalty)
+            
+        elif block_type == 'rate_limit':
+            # 请求限流
+            penalty = random.uniform(30, 60)
+            self.logger.warning(f"[限流] 等待 {penalty:.0f}秒...")
+            time.sleep(penalty)
+            
+        elif block_type == 'ip_ban':
+            # IP被封
+            self.logger.error("=" * 60)
+            self.logger.error("🚫 IP可能被封禁")
+            self.logger.error("建议：")
+            self.logger.error("1. 更换IP地址（重启路由器或使用代理）")
+            self.logger.error("2. 更新Cookie")
+            self.logger.error("3. 等待24小时后重试")
+            self.logger.error("=" * 60)
+            
+            penalty = random.uniform(60, 120)
+            time.sleep(penalty)
+        
+        else:
+            # 未知封禁类型
+            penalty = random.uniform(30, 60)
+            self.logger.warning(f"[未知封禁] 等待 {penalty:.0f}秒...")
+            time.sleep(penalty)
+        
+        return True  # 继续重试
     
     def _smart_delay(self):
-        """
-        智能延迟策略
-        - 基础随机延迟
-        - 请求次数越多，延迟越长
-        - 避免规律性请求
-        """
-        # 计算自上次请求的时间
+        """智能延迟策略"""
         current_time = time.time()
         elapsed = current_time - self.last_request_time
         
-        # 基础延迟
         base_delay = random.uniform(self.min_delay, self.max_delay)
         
         # 每10次请求增加额外延迟
@@ -167,7 +227,6 @@ class AntiBlockSpider:
             self.logger.warning(f"  [反爬] 第{self.request_count}次请求，长时间休息 {long_delay:.1f}秒")
             base_delay += long_delay
         
-        # 确保最小间隔
         if elapsed < base_delay:
             wait_time = base_delay - elapsed
             if wait_time > 1:
@@ -176,33 +235,9 @@ class AntiBlockSpider:
         
         self.last_request_time = time.time()
     
-    def _check_blocked(self, html: str, url: str = "") -> Tuple[bool, str, Dict]:
-        """
-        检查是否被封禁（使用改进的检测器）
-        
-        Returns:
-            (是否被封禁, 原因, 详细分析)
-        """
-        
-        detector = BlockDetector()
-        is_blocked, reason = detector.check_blocked(html, url)
-        
-        analysis = {}
-        if is_blocked:
-            analysis = detector.analyze_block_page(html)
-        
-        return is_blocked, reason, analysis
-    
     def _requestsGet(self, url, max_retries=3):
         """
-        增强版GET请求
-        
-        Args:
-            url: 目标URL
-            max_retries: 最大重试次数
-            
-        Returns:
-            HTML内容
+        ⭐ 关键修复：增强版GET请求，正确处理Cookie更新
         """
         self.request_count += 1
         
@@ -211,13 +246,18 @@ class AntiBlockSpider:
                 # 智能延迟
                 self._smart_delay()
                 
+                # ⭐ 如果之前失败过，强制重新加载cookie
+                force_reload = (attempt > 0) or (self.cookie_fail_count > 0)
+                
                 # 准备请求参数
                 headers = self._get_headers()
-                cookies = self._get_cookies()
-                proxies = self._get_proxy()
+                cookies = self._get_cookies(force_reload=force_reload)
+                proxies = None  # self._get_proxy() if self.use_proxy else None
                 
                 self.logger.debug(f"  [请求] 尝试 {attempt + 1}/{max_retries}")
-                self.logger.debug(f"  [UA] {headers['User-Agent'][:50]}...")
+                
+                if force_reload:
+                    self.logger.info(f"  [Cookie] 已强制重新加载")
                 
                 # 发送请求
                 response = self.session.get(
@@ -231,61 +271,40 @@ class AntiBlockSpider:
                 
                 response.raise_for_status()
                 
-                # 检查是否被封禁
-                is_blocked, reason, analysis = self._check_blocked(response.text, url)
+                # ⭐ 使用新的封禁处理逻辑
+                should_retry = self._handle_blocked_response(response.text, url, attempt)
                 
-                if is_blocked:
-                    self.logger.error(f"  [封禁] {reason}")
-                    
-                    # 打印详细分析
-                    if analysis.get('block_type'):
-                        self.logger.error(f"  [类型] {analysis['block_type']}")
-                    if analysis.get('captcha_type'):
-                        self.logger.error(f"  [验证码] {analysis['captcha_type']}")
-                    if analysis.get('error_message'):
-                        self.logger.error(f"  [消息] {analysis['error_message']}")
-                    
-                    # 打印建议
-                    if analysis.get('suggestions'):
-                        self.logger.warning(f"  [建议]:")
-                        for sug in analysis['suggestions'][:3]:
-                            self.logger.warning(f"    - {sug}")
-                    
+                if should_retry:
                     if attempt < max_retries - 1:
-                        # 被封禁时增加更长延迟
-                        penalty_delay = random.uniform(30, 60)
-                        self.logger.warning(f"  [封禁] 等待 {penalty_delay:.1f}秒后重试...")
-                        time.sleep(penalty_delay)
-                        
-                        # 如果是验证码，多等一会
-                        if analysis.get('block_type') == 'captcha':
-                            extra_delay = random.uniform(30, 60)
-                            self.logger.warning(f"  [验证码] 额外等待 {extra_delay:.1f}秒...")
-                            time.sleep(extra_delay)
-                        
                         continue
                     else:
-                        error_msg = f"多次尝试后仍被封禁: {analysis.get('block_type', 'unknown')}"
-                        self.logger.error(f"  [终止] {error_msg}")
-                        raise Exception(error_msg)
+                        raise Exception(f"多次尝试后仍被封禁")
                 
-                # 成功返回
+                # 成功！重置失败计数器
+                if self.cookie_fail_count > 0:
+                    self.logger.info("✓ Cookie恢复正常")
+                    self.cookie_fail_count = 0
                 return response.text
                 
             except requests.HTTPError as e:
                 if e.response.status_code == 429:
-                    # 请求过于频繁
                     retry_after = int(e.response.headers.get('Retry-After', 60))
-                    self.logger.warning(f"  [限流] 429错误，等待 {retry_after}秒")
+                    self.logger.warning(f"  [429限流] 等待 {retry_after}秒")
                     time.sleep(retry_after)
+                    
                 elif e.response.status_code == 403:
-                    self.logger.error(f"  [403] 访问被拒绝，可能需要更新Cookie")
+                    self.logger.error(f"  [403拒绝] Cookie可能已失效")
+                    self.cookie_fail_count += 1
+                    
                     if attempt < max_retries - 1:
+                        # 清除cookie缓存，下次会重新加载
+                        self.cookie_manager.invalidate_cache()
                         time.sleep(random.uniform(20, 40))
                     else:
+                        self.logger.error("请手动更新Cookie后重试")
                         raise
                 else:
-                    self.logger.error(f"  [HTTP错误] {e.response.status_code}")
+                    self.logger.error(f"  [HTTP {e.response.status_code}] {e}")
                     if attempt == max_retries - 1:
                         raise
                         
@@ -293,10 +312,10 @@ class AntiBlockSpider:
                 self.logger.error(f"  [网络错误] {e}")
                 if attempt == max_retries - 1:
                     raise
-                time.sleep(2 ** attempt)  # 指数退避
+                time.sleep(2 ** attempt)
         
         raise Exception(f"请求失败，已重试{max_retries}次")
-    
+ 
     def requestLocale(self):
         """请求指定区域的房源列表"""
         page = 1
