@@ -10,6 +10,8 @@ import time
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium_stealth import stealth        # ① 引入 stealth
 from logger import get_logger
 
 
@@ -21,7 +23,7 @@ class SeleniumCookieHelper:
         self.logger = get_logger()
         self.driver = None
     
-    def open_for_manual_verification(self, url, wait_seconds=60):
+    def open_for_manual_verification(self, url, current_cookies, wait_seconds=60):
         """
         打开浏览器供用户手动验证，然后自动提取Cookie
         
@@ -36,12 +38,22 @@ class SeleniumCookieHelper:
             self.logger.info("🌐 正在启动浏览器...")
             
             # 创建浏览器
-            options = EdgeOptions()
+            options = ChromeOptions()
             # 不使用无头模式，让用户可以看到浏览器
             options.add_argument('--start-maximized')
             options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
             
-            self.driver = webdriver.Edge(options=options)
+            self.driver = webdriver.Chrome(options=options)
+            stealth(self.driver,
+                languages=["en-US", "en"],
+                vendor="Google Inc.",
+                platform="Win64",
+                webgl_vendor="Intel Inc.",
+                renderer="Intel Iris OpenGL Engine",
+                fix_hairline=True)
+            self.driver.get(url)
+            for key, value in current_cookies.items():
+                self.driver.add_cookie({"name":key, "value": value, "domain": ".lianjia.com", "path": "/"}) 
             
             self.logger.info(f"✓ 浏览器已启动，正在访问: {url}")
             self.driver.get(url)
@@ -96,41 +108,10 @@ class SeleniumCookieHelper:
                 self.logger.info("正在关闭浏览器...")
                 self.driver.quit()
                 self.logger.info("✓ 浏览器已关闭")
-    
-    def auto_extract_cookies(self, url, timeout=10):
-        """
-        自动提取Cookie（不等待用户操作，用于页面没有验证码的情况）
-        
-        Args:
-            url: 要访问的URL
-            timeout: 页面加载超时时间
-            
-        Returns:
-            Cookie字典
-        """
-        try:
-            options = EdgeOptions()
-            options.add_argument('--headless')  # 无头模式
-            options.add_argument('--disable-gpu')
-            options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-            
-            self.driver = webdriver.Edge(options=options)
-            self.driver.set_page_load_timeout(timeout)
-            
-            self.driver.get(url)
-            time.sleep(3)  # 等待Cookie设置
-            
-            cookies = self.driver.get_cookies()
-            cookie_dict = {cookie['name']: cookie['value'] for cookie in cookies}
-            
-            return cookie_dict
-            
-        finally:
-            if self.driver:
-                self.driver.quit()
 
 
 def update_cookies_with_selenium(url='https://sh.lianjia.com/ershoufang/', 
+                                 current_cookies=None,
                                  config_path='config/cookies.json',
                                  wait_seconds=60):
     """
@@ -147,7 +128,7 @@ def update_cookies_with_selenium(url='https://sh.lianjia.com/ershoufang/',
     
     try:
         # 打开浏览器，等待用户验证
-        cookies = helper.open_for_manual_verification(url, wait_seconds)
+        cookies = helper.open_for_manual_verification(url, current_cookies, wait_seconds)
         
         if not cookies:
             logger.error("未获取到Cookie")
@@ -180,112 +161,3 @@ def update_cookies_with_selenium(url='https://sh.lianjia.com/ershoufang/',
     except Exception as e:
         logger.error(f"Cookie更新失败: {e}")
         return False
-
-
-# ============ 修改 spider.py 中的 _handle_blocked_response 方法 ============
-
-"""
-将以下代码添加到 spider.py 的 AntiBlockSpider 类中：
-
-def _handle_blocked_response(self, html: str, url: str, attempt: int) -> bool:
-    '''处理被封禁的响应'''
-    is_blocked, reason, analysis = self._check_blocked(html, url)
-    
-    if not is_blocked:
-        return False
-    
-    self.logger.error(f"  [封禁检测] {reason}")
-    
-    block_type = analysis.get('block_type', 'unknown')
-    
-    if block_type == 'captcha':
-        self.logger.error("=" * 60)
-        self.logger.error("🚫 检测到验证码，启动自动更新流程...")
-        self.logger.error("=" * 60)
-        
-        # ⭐ 新增：使用Selenium自动更新Cookie
-        try:
-            from selenium_cookie_helper import update_cookies_with_selenium
-            
-            success = update_cookies_with_selenium(
-                url=url,
-                config_path=self.cookie_manager.config_path,
-                wait_seconds=60  # 等待60秒供用户验证
-            )
-            
-            if success:
-                self.logger.info("✓ Cookie已自动更新！")
-                # 强制重新加载Cookie
-                self.cookie_manager.invalidate_cache()
-                self.cookie_fail_count = 0
-                return True  # 继续重试
-            else:
-                self.logger.error("✗ Cookie更新失败")
-                
-        except ImportError:
-            self.logger.error("未找到Selenium模块，请安装: pip install selenium")
-        except Exception as e:
-            self.logger.error(f"自动更新Cookie时出错: {e}")
-        
-        # 如果自动更新失败，回退到手动模式
-        self.logger.error("请手动更新Cookie")
-        self.cookie_fail_count += 1
-        
-        if self.cookie_fail_count >= self.max_cookie_fails:
-            raise Exception("Cookie失效次数过多，终止运行")
-        
-        time.sleep(60)
-        
-    elif block_type == 'rate_limit':
-        penalty = random.uniform(30, 60)
-        self.logger.warning(f"[限流] 等待 {penalty:.0f}秒...")
-        time.sleep(penalty)
-        
-    elif block_type == 'ip_ban':
-        self.logger.error("🚫 IP可能被封禁")
-        penalty = random.uniform(60, 120)
-        time.sleep(penalty)
-    
-    else:
-        penalty = random.uniform(30, 60)
-        self.logger.warning(f"[未知封禁] 等待 {penalty:.0f}秒...")
-        time.sleep(penalty)
-    
-    return True
-"""
-
-# ============ 完整的使用示例 ============
-
-if __name__ == '__main__':
-    """
-    独立运行此脚本来更新Cookie
-    """
-    from logger import setup_logger
-    import logging
-    
-    setup_logger(log_level=logging.INFO)
-    
-    print("\n" + "=" * 60)
-    print("🍪 链家Cookie自动更新工具（集成版）")
-    print("=" * 60)
-    print("\n提示：")
-    print("  - 浏览器将自动打开链家网站")
-    print("  - 如出现验证码，请手动完成验证")
-    print("  - 验证完成后，Cookie将自动保存")
-    print("  - 60秒后自动继续（或按Enter提前继续）")
-    print("\n" + "=" * 60 + "\n")
-    
-    success = update_cookies_with_selenium(
-        url='https://sh.lianjia.com/ershoufang/',
-        config_path='config/cookies.json',
-        wait_seconds=60
-    )
-    
-    if success:
-        print("\n" + "=" * 60)
-        print("✅ Cookie更新成功！现在可以运行爬虫了")
-        print("=" * 60)
-    else:
-        print("\n" + "=" * 60)
-        print("❌ Cookie更新失败")
-        print("=" * 60)

@@ -15,6 +15,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from cookie_manager import get_cookie_manager
 from improved_block_detection import BlockDetector
+from selenium_cookie_helper import update_cookies_with_selenium
 
 
 class AntiBlockSpider:
@@ -27,7 +28,7 @@ class AntiBlockSpider:
     ]
     
     def __init__(self, host, locale, t='l2', min_price=0, max_price=0, 
-                 use_proxy=False, min_delay=3, max_delay=8):
+                 use_proxy=False, min_delay=3, max_delay=5):
         """初始化爬虫"""
         self.base_url = host
         self.ershoufang_url = self.base_url + '/ershoufang'
@@ -130,83 +131,71 @@ class AntiBlockSpider:
             analysis = self.block_detector.analyze_block_page(html)
 
         return is_blocked, reason, analysis
-    
-    def _handle_blocked_response(self, html: str, url: str, attempt: int) -> bool:
-        """
-        ⭐ 新增：专门处理被封禁的响应
-        
-        Returns:
-            是否应该继续重试
-        """
+
+    def _handle_blocked_response(self, html: str, url: str, cookies: Dict, attempt: int) -> bool:
+        '''处理被封禁的响应'''
         is_blocked, reason, analysis = self._check_blocked(html, url)
         
         if not is_blocked:
-            return False  # 没有被封禁，不需要特殊处理
+            return False
         
         self.logger.error(f"  [封禁检测] {reason}")
         
-        # 打印详细分析
         block_type = analysis.get('block_type', 'unknown')
         
-        if block_type != 'unknown':
-            self.logger.error(f"  [封禁类型] {block_type}")
-        
-        if analysis.get('captcha_type'):
-            self.logger.error(f"  [验证码类型] {analysis['captcha_type']}")
-        
-        if analysis.get('error_message'):
-            self.logger.error(f"  [错误信息] {analysis['error_message']}")
-        
-        # 根据封禁类型采取不同策略
         if block_type == 'captcha':
             self.logger.error("=" * 60)
-            self.logger.error("🚫 检测到验证码，需要人工处理！")
-            self.logger.error("=" * 60)
-            self.logger.error("请执行以下步骤：")
-            self.logger.error("1. 打开浏览器访问：" + url)
-            self.logger.error("2. 完成验证码验证")
-            self.logger.error("3. 按F12打开开发者工具 -> Application -> Cookies")
-            self.logger.error("4. 复制所有Cookie并更新到 config/cookies.json")
-            self.logger.error("5. 重新运行程序")
+            self.logger.error("🚫 检测到验证码，启动自动更新流程...")
             self.logger.error("=" * 60)
             
+            # ⭐ 新增：使用Selenium自动更新Cookie
+            try:
+                
+                success = update_cookies_with_selenium(
+                    url=url,
+                    current_cookies=cookies,
+                    config_path=self.cookie_manager.config_path,
+                    wait_seconds=20  # 等待60秒供用户验证
+                )
+                
+                if success:
+                    self.logger.info("✓ Cookie已自动更新！")
+                    # 强制重新加载Cookie
+                    self.cookie_manager.invalidate_cache()
+                    self.cookie_fail_count = 0
+                    return True  # 继续重试
+                else:
+                    self.logger.error("✗ Cookie更新失败")
+                    
+            except Exception as e:
+                self.logger.error(f"自动更新Cookie时出错: {e}")
+            
+            # 如果自动更新失败，回退到手动模式
+            self.logger.error("请手动更新Cookie")
             self.cookie_fail_count += 1
             
             if self.cookie_fail_count >= self.max_cookie_fails:
-                self.logger.critical("Cookie连续失败次数过多，终止运行")
-                raise Exception("Cookie失效，需要手动更新")
+                raise Exception("Cookie失效次数过多，终止运行")
             
-            # 验证码情况下等待更长时间
-            penalty = random.uniform(60, 120)
-            self.logger.warning(f"等待 {penalty:.0f}秒 后重试...")
-            time.sleep(penalty)
+            time.sleep(5)
             
         elif block_type == 'rate_limit':
-            # 请求限流
             penalty = random.uniform(30, 60)
             self.logger.warning(f"[限流] 等待 {penalty:.0f}秒...")
             time.sleep(penalty)
             
         elif block_type == 'ip_ban':
-            # IP被封
-            self.logger.error("=" * 60)
             self.logger.error("🚫 IP可能被封禁")
-            self.logger.error("建议：")
-            self.logger.error("1. 更换IP地址（重启路由器或使用代理）")
-            self.logger.error("2. 更新Cookie")
-            self.logger.error("3. 等待24小时后重试")
-            self.logger.error("=" * 60)
-            
             penalty = random.uniform(60, 120)
             time.sleep(penalty)
         
         else:
-            # 未知封禁类型
             penalty = random.uniform(30, 60)
             self.logger.warning(f"[未知封禁] 等待 {penalty:.0f}秒...")
             time.sleep(penalty)
         
-        return True  # 继续重试
+        return True
+
     
     def _smart_delay(self):
         """智能延迟策略"""
@@ -273,7 +262,7 @@ class AntiBlockSpider:
                 response.raise_for_status()
                 
                 # ⭐ 使用新的封禁处理逻辑
-                should_retry = self._handle_blocked_response(response.text, url, attempt)
+                should_retry = self._handle_blocked_response(response.text, url, cookies, attempt)
                 
                 if should_retry:
                     if attempt < max_retries - 1:
@@ -399,7 +388,7 @@ class AntiBlockSpider:
                 
                 # 避免请求过快（在尝试间增加更长延迟）
                 if attempt < max_attempts:
-                    delay = random.uniform(10, 20)
+                    delay = random.uniform(5, 10)
                     self.logger.info(f"    等待 {delay:.1f}秒后进行下一次尝试...")
                     time.sleep(delay)
                     
