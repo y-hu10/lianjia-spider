@@ -252,6 +252,7 @@ class AntiBlockSpider:
                 # 准备请求参数
                 headers = self._get_headers()
                 cookies = self._get_cookies(force_reload=force_reload)
+                self.logger.info(f" cookies is {cookies}")
                 proxies = None  # self._get_proxy() if self.use_proxy else None
                 
                 self.logger.debug(f"  [请求] 尝试 {attempt + 1}/{max_retries}")

@@ -3,114 +3,16 @@
     "locales": ["jingansi", "beiwaitan", "lianyang", "huamu", "yuanshen", "beicai", "biyun", "jinyang", "lujiazui", "meiyuan1", "nanmatou", "shibo", "jinqiao", "sanlin", "weifang", "yangdong", "yangjing", "yangsiqiantan", "yuqiao1", "zhangjiang", "buyecheng", "caojiadu", "daning", "jiangninglu", "nanjingxilu", "suhewan", "xizangbeilu", "linpinglu", "luxungongyuan", "sichuanbeilu", "dapuqiao", "dongjiadu", "huaihaizhonglu", "huangpubinjiang", "laoximen", "nanjingdonglu", "penglaigongyuan", "renminguangchang", "shibobinjiang", "wuliqiao", "xintiandi", "yuyuan", "anshan", "dongwaitan", "huangxinggongyuan", "kongjianglu", "wujiaochang", "zhoujiazuilu", "caohejing", "changqiao", "hengshanlu", "huadongligong", "jianguoxilu", "kangjian", "longhua", "shanghainanzhan", "tianlin", "wantiguan", "xietulu", "xuhuibinjiang", "zhiwuyuan", "gubei", "tianshan", "xinhualu", "zhenninglu", "zhongshangongyuan", "caoyang", "changfeng1", "wuning", "zhenru", "wanli", "dahua", "changshoulu", "ganquanyichuan", "guangxin", "zhongyuanliangwancheng"],
     "types": ["l3"],
     "price_ranges": [
-        {"min": 0, "max": 800},
         {"min": 800, "max": 1200},
-        {"min": 1200, "max": 1600},
-        {"min": 1600, "max": 2400},
-        {"min": 2400, "max": 3200}
+        {"min": 1200, "max": 1600}
     ],
     "locale_specific_price_ranges": {
-        "beicai": [
-            {"min": 0, "max": 200},
-            {"min": 200, "max": 300},
-            {"min": 300, "max": 400},
-            {"min": 400, "max": 500},
-            {"min": 500, "max": 600},
-            {"min": 600, "max": 700},
-            {"min": 700, "max": 800},
-            {"min": 800, "max": 1200},
-            {"min": 1200, "max": 1600},
-            {"min": 1600, "max": 2000},
-            {"min": 2000, "max": 3200}
-        ],
-        "dahua": [
-            {"min": 0, "max": 200},
-            {"min": 200, "max": 300},
-            {"min": 300, "max": 400},
-            {"min": 400, "max": 500},
-            {"min": 500, "max": 600},
-            {"min": 600, "max": 700},
-            {"min": 700, "max": 800},
-            {"min": 800, "max": 1200},
-            {"min": 1200, "max": 1600},
-            {"min": 1600, "max": 2000},
-            {"min": 2000, "max": 3200}
-	],
-        "jinqiao": [
-            {"min": 0, "max": 200},
-            {"min": 200, "max": 300},
-            {"min": 300, "max": 400},
-            {"min": 400, "max": 500},
-            {"min": 500, "max": 600},
-            {"min": 600, "max": 700},
-            {"min": 700, "max": 800},
-            {"min": 800, "max": 1200},
-            {"min": 1200, "max": 1600},
-            {"min": 1600, "max": 3200}
-	],
-        "jinyang": [
-            {"min": 0, "max": 200},
-            {"min": 200, "max": 300},
-            {"min": 300, "max": 400},
-            {"min": 400, "max": 500},
-            {"min": 500, "max": 600},
-            {"min": 600, "max": 700},
-            {"min": 700, "max": 800},
-            {"min": 800, "max": 1200},
-            {"min": 1200, "max": 1600},
-            {"min": 1600, "max": 3200}
-	],
-        "sanlin": [
-            {"min": 0, "max": 200},
-            {"min": 200, "max": 300},
-            {"min": 300, "max": 400},
-            {"min": 400, "max": 500},
-            {"min": 500, "max": 600},
-            {"min": 600, "max": 700},
-            {"min": 700, "max": 800},
-            {"min": 800, "max": 1200},
-            {"min": 1200, "max": 1600},
-            {"min": 1600, "max": 3200}
-	],
-        "yangsiqiantan": [
-            {"min": 0, "max": 200},
-            {"min": 200, "max": 300},
-            {"min": 300, "max": 400},
-            {"min": 400, "max": 500},
-            {"min": 500, "max": 600},
-            {"min": 600, "max": 700},
-            {"min": 700, "max": 800},
-            {"min": 800, "max": 1200},
-            {"min": 1200, "max": 1600},
-            {"min": 1600, "max": 2000},
-            {"min": 2000, "max": 2400},
-            {"min": 2400, "max": 2800},
-            {"min": 2800, "max": 3200}
-	],
-        "zhangjiang": [
-            {"min": 0, "max": 200},
-            {"min": 200, "max": 300},
-            {"min": 300, "max": 400},
-            {"min": 400, "max": 500},
-            {"min": 500, "max": 600},
-            {"min": 600, "max": 700},
-            {"min": 700, "max": 800},
-            {"min": 800, "max": 1200},
-            {"min": 1200, "max": 1600},
-            {"min": 1600, "max": 2000},
-            {"min": 2000, "max": 2400},
-            {"min": 2400, "max": 2800},
-            {"min": 2800, "max": 3200}
-	],
         "daning": [
-            {"min": 0, "max": 800},
             {"min": 800, "max": 900},
             {"min": 900, "max": 1000},
             {"min": 1000, "max": 1100},
             {"min": 1100, "max": 1200},
-            {"min": 1200, "max": 1600},
-            {"min": 1600, "max": 2000},
-            {"min": 2000, "max": 3200}
+            {"min": 1200, "max": 1600}
         ]
     },
     "stability": {
