@@ -164,6 +164,20 @@ class BlockDetector:
         """检查页面结构"""
         try:
             soup = BeautifulSoup(html, 'lxml')
+            page_text = soup.get_text(" ", strip=True)
+            title = soup.find('title')
+            title_text = title.string.strip() if title and title.string else ""
+            
+            has_known_listing_marker = (
+                soup.find(class_='sellListContent') is not None or
+                soup.find(class_='page-box') is not None or
+                soup.find(class_='content__list') is not None or
+                soup.find(attrs={'data-lj_action_housedel_id': True}) is not None
+            )
+            has_meaningful_content = (
+                len(page_text) >= 200 and
+                any(keyword in page_text for keyword in ('二手房', '房源', '总价', '单价', '带看', '关注', '链家'))
+            )
             
             # 检查关键元素是否缺失
             missing_count = 0
@@ -171,17 +185,20 @@ class BlockDetector:
                 if not soup.find(class_=element_class):
                     missing_count += 1
             
-            # 如果所有关键元素都缺失，可能是验证页面
-            if missing_count == len(self.structure_indicators['missing_elements']):
+            # 如果所有旧版关键元素都缺失，同时又看不到有效内容，才判定为异常页面。
+            if (
+                missing_count == len(self.structure_indicators['missing_elements']) and
+                not has_known_listing_marker and
+                not has_meaningful_content
+            ):
                 return True, f"缺失关键页面元素"
             
             # 检查标题
-            title = soup.find('title')
-            if title and title.string:
-                title_text = title.string.lower()
+            if title_text:
+                title_text_lower = title_text.lower()
                 for abnormal in self.structure_indicators['abnormal_title']:
-                    if abnormal.lower() in title_text:
-                        return True, f"异常页面标题: '{title.string}'"
+                    if abnormal.lower() in title_text_lower and not has_meaningful_content:
+                        return True, f"异常页面标题: '{title_text}'"
             
         except Exception as e:
             self.logger.debug(f"结构检查失败: {e}")

@@ -7,6 +7,7 @@
 
 import json
 import time
+import re
 from urllib.parse import urlparse
 from datetime import datetime
 from selenium import webdriver
@@ -31,12 +32,8 @@ class SeleniumCookieHelper:
         netloc = parsed.netloc
         return f"{scheme}://{netloc}/"
 
-    def _is_page_ready(self):
-        """检测页面是否完成加载且已离开验证码页。"""
-        page_source = self.driver.page_source
-        current_url = self.driver.current_url
-        ready_state = self.driver.execute_script("return document.readyState")
-
+    def _is_blocked_page(self, page_source, current_url):
+        """判断当前页面是否仍处于验证/拦截状态。"""
         blocked_markers = (
             'captcha',
             'verify',
@@ -47,14 +44,62 @@ class SeleniumCookieHelper:
         )
         page_text = page_source.lower()
         url_text = current_url.lower()
-        is_blocked = any(marker in page_text or marker in url_text for marker in blocked_markers)
-        has_listing = (
-            'sellListContent' in page_source or
-            'page-box fr' in page_source or
-            'totalSellCount' in page_source
+        return any(marker in page_text or marker in url_text for marker in blocked_markers)
+
+    def _has_meaningful_lianjia_content(self, page_source, current_url, page_title, body_text):
+        """使用较宽松的启发式判断是否已回到可用的链家页面。"""
+        current_url_lower = current_url.lower()
+        title_text = (page_title or "").lower()
+        normalized_source = page_source.lower()
+        normalized_body = re.sub(r'\s+', ' ', (body_text or '').lower())
+
+        known_page_markers = (
+            'selllistcontent',
+            'page-box fr',
+            'totalsellcount',
+            'content__list',
+            'data-lj_action',
+            'ershoufang-detail',
+            'm-content',
+        )
+        content_keywords = (
+            '二手房',
+            '房源',
+            '总价',
+            '单价',
+            '关注',
+            '带看',
+            '链家',
         )
 
-        return ready_state == 'complete' and has_listing and not is_blocked
+        has_known_marker = any(marker in normalized_source for marker in known_page_markers)
+        has_real_url = 'lianjia.com' in current_url_lower and '/ershoufang/' in current_url_lower
+        has_real_title = any(keyword in page_title for keyword in ('二手房', '房源', '链家'))
+        has_real_text = len(normalized_body) >= 200 and any(
+            keyword.lower() in normalized_body for keyword in content_keywords
+        )
+
+        return has_known_marker or (has_real_url and (has_real_title or has_real_text))
+
+    def _is_page_ready(self):
+        """检测页面是否完成加载且已离开验证码页。"""
+        page_source = self.driver.page_source
+        current_url = self.driver.current_url
+        page_title = self.driver.title
+        ready_state = self.driver.execute_script("return document.readyState")
+        body_text = self.driver.execute_script(
+            "return document.body ? (document.body.innerText || '') : '';"
+        )
+
+        is_blocked = self._is_blocked_page(page_source, current_url)
+        has_page_content = self._has_meaningful_lianjia_content(
+            page_source,
+            current_url,
+            page_title,
+            body_text,
+        )
+
+        return ready_state == 'complete' and has_page_content and not is_blocked
     
     def open_for_manual_verification(self, url, current_cookies, wait_seconds=60):
         """
