@@ -46,6 +46,69 @@ class SeleniumCookieHelper:
         url_text = current_url.lower()
         return any(marker in page_text or marker in url_text for marker in blocked_markers)
 
+    def _inspect_page_state(self):
+        """采集当前页面状态，避免仅凭 URL 或源码中的脚本片段误判。"""
+        page_source = self.driver.page_source
+        current_url = self.driver.current_url
+        page_title = self.driver.title
+        ready_state = self.driver.execute_script("return document.readyState")
+        body_text = self.driver.execute_script(
+            "return document.body ? (document.body.innerText || '') : '';"
+        )
+        frame_sources = self.driver.execute_script(
+            """
+            return Array.from(document.querySelectorAll('iframe'))
+                .map(frame => frame.src || '')
+                .filter(Boolean);
+            """
+        )
+
+        body_text = body_text or ""
+        visible_text = re.sub(r'\s+', ' ', body_text.lower())
+        title_text = (page_title or "").lower()
+        url_text = current_url.lower()
+        frame_text = " ".join(frame_sources).lower()
+
+        blocked_markers = (
+            'captcha',
+            'verify',
+            'security',
+            '人机验证',
+            '访问验证',
+            '请输入验证码',
+            '请完成验证',
+            '滑动验证',
+        )
+        blocked_hits = [
+            marker for marker in blocked_markers
+            if marker in visible_text or marker in title_text or marker in url_text or marker in frame_text
+        ]
+        has_verification_iframe = any(
+            marker in frame_text for marker in ('captcha', 'verify', 'security', 'geetest', 'challenge')
+        )
+
+        has_page_content = self._has_meaningful_lianjia_content(
+            page_source,
+            current_url,
+            page_title,
+            body_text,
+        )
+        # 验证脚本/iframe 可能在正常页面中残留，只有在正文内容不足时才视为仍被拦截。
+        is_blocked = bool(blocked_hits or has_verification_iframe) and not has_page_content
+
+        return {
+            'page_source': page_source,
+            'current_url': current_url,
+            'page_title': page_title,
+            'ready_state': ready_state,
+            'body_text': body_text,
+            'is_blocked': is_blocked,
+            'blocked_hits': blocked_hits,
+            'has_verification_iframe': has_verification_iframe,
+            'has_page_content': has_page_content,
+            'body_length': len(body_text.strip()),
+        }
+
     def _has_meaningful_lianjia_content(self, page_source, current_url, page_title, body_text):
         """使用较宽松的启发式判断是否已回到可用的链家页面。"""
         current_url_lower = current_url.lower()
@@ -83,23 +146,12 @@ class SeleniumCookieHelper:
 
     def _is_page_ready(self):
         """检测页面是否完成加载且已离开验证码页。"""
-        page_source = self.driver.page_source
-        current_url = self.driver.current_url
-        page_title = self.driver.title
-        ready_state = self.driver.execute_script("return document.readyState")
-        body_text = self.driver.execute_script(
-            "return document.body ? (document.body.innerText || '') : '';"
+        page_state = self._inspect_page_state()
+        return (
+            page_state['ready_state'] in ('interactive', 'complete') and
+            page_state['has_page_content'] and
+            not page_state['is_blocked']
         )
-
-        is_blocked = self._is_blocked_page(page_source, current_url)
-        has_page_content = self._has_meaningful_lianjia_content(
-            page_source,
-            current_url,
-            page_title,
-            body_text,
-        )
-
-        return ready_state == 'complete' and has_page_content and not is_blocked
     
     def open_for_manual_verification(self, url, current_cookies, wait_seconds=60):
         """
@@ -157,13 +209,28 @@ class SeleniumCookieHelper:
             start_time = time.time()
             last_status_log = 0
             while True:
-                if self._is_page_ready():
+                page_state = self._inspect_page_state()
+                if (
+                    page_state['ready_state'] in ('interactive', 'complete') and
+                    page_state['has_page_content'] and
+                    not page_state['is_blocked']
+                ):
                     self.logger.info("✓ 检测到页面已完成加载")
                     break
 
                 now = time.time()
                 if now - last_status_log >= 5:
-                    self.logger.info(f"⏳ 等待验证码通过后的页面加载完成... 当前页面: {self.driver.current_url}")
+                    blocked_reason = ", ".join(page_state['blocked_hits']) if page_state['blocked_hits'] else "none"
+                    self.logger.info(
+                        "⏳ 等待验证码通过后的页面加载完成... "
+                        f"当前页面: {page_state['current_url']} | "
+                        f"readyState={page_state['ready_state']} | "
+                        f"content={page_state['has_page_content']} | "
+                        f"blocked={page_state['is_blocked']} | "
+                        f"iframe={page_state['has_verification_iframe']} | "
+                        f"body_len={page_state['body_length']} | "
+                        f"hits={blocked_reason}"
+                    )
                     last_status_log = now
 
                 if wait_seconds > 0 and (now - start_time) >= wait_seconds:
