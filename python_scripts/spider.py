@@ -132,12 +132,12 @@ class AntiBlockSpider:
 
         return is_blocked, reason, analysis
 
-    def _handle_blocked_response(self, html: str, url: str, cookies: Dict, attempt: int) -> bool:
+    def _handle_blocked_response(self, html: str, url: str, cookies: Dict, attempt: int) -> Tuple[bool, Optional[str]]:
         '''处理被封禁的响应'''
         is_blocked, reason, analysis = self._check_blocked(html, url)
         
         if not is_blocked:
-            return False
+            return False, None
         
         self.logger.error(f"  [封禁检测] {reason}")
         
@@ -151,19 +151,29 @@ class AntiBlockSpider:
             # ⭐ 新增：使用Selenium自动更新Cookie
             try:
                 
-                success = update_cookies_with_selenium(
+                result = update_cookies_with_selenium(
                     url=url,
                     current_cookies=cookies,
                     config_path=self.cookie_manager.config_path,
-                    wait_seconds=20  # 等待60秒供用户验证
+                    wait_seconds=180,  # 等待用户验证并自动检测页面加载完成
+                    return_page_data=True
                 )
                 
-                if success:
+                if result and result.get('success'):
                     self.logger.info("✓ Cookie已自动更新！")
                     # 强制重新加载Cookie
                     self.cookie_manager.invalidate_cache()
                     self.cookie_fail_count = 0
-                    return True  # 继续重试
+                    
+                    page_source = result.get('page_source')
+                    current_url = result.get('current_url', url)
+                    if page_source:
+                        page_blocked, _, _ = self._check_blocked(page_source, current_url)
+                        if not page_blocked:
+                            self.logger.info("✓ 直接使用浏览器已加载页面，无需立即重发请求")
+                            return False, page_source
+                    
+                    return True, None  # 页面仍不可用时继续重试
                 else:
                     self.logger.error("✗ Cookie更新失败")
                     
@@ -194,7 +204,7 @@ class AntiBlockSpider:
             self.logger.warning(f"[未知封禁] 等待 {penalty:.0f}秒...")
             time.sleep(penalty)
         
-        return True
+        return True, None
 
     
     def _smart_delay(self):
@@ -262,7 +272,13 @@ class AntiBlockSpider:
                 response.raise_for_status()
                 
                 # ⭐ 使用新的封禁处理逻辑
-                should_retry = self._handle_blocked_response(response.text, url, cookies, attempt)
+                should_retry, recovered_html = self._handle_blocked_response(response.text, url, cookies, attempt)
+                
+                if recovered_html is not None:
+                    if self.cookie_fail_count > 0:
+                        self.logger.info("✓ Cookie恢复正常")
+                        self.cookie_fail_count = 0
+                    return recovered_html
                 
                 if should_retry:
                     if attempt < max_retries - 1:

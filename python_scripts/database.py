@@ -159,3 +159,19 @@ class Database:
             house_id: 房源ID
         """
         self.c.execute("DELETE FROM SELLOUT WHERE ID=?", (house_id,))
+
+    def fetchAllHouses(self):
+        """获取当前 HOUSE 表全部房源。"""
+        return self.c.execute(
+            "SELECT ID, LOCATION, TYPE, SIZE, TOWARDS, FLOOD, YEAR, BUILDING, "
+            "TOTAL_PRICE, UNIT_PRICE, DATE_PRICE, REGION, QUOTEDATE, LASTTRADEDATE, VIEWNUM, FOLLOWNUM "
+            "FROM HOUSE ORDER BY REGION, ID"
+        ).fetchall()
+
+    def fetchAllSellOut(self):
+        """获取当前 SELLOUT 表全部房源。"""
+        return self.c.execute(
+            "SELECT ID, LOCATION, TYPE, SIZE, TOWARDS, FLOOD, YEAR, BUILDING, "
+            "TOTAL_PRICE, UNIT_PRICE, DATE_PRICE, DATE, REGION, QUOTEDATE, LASTTRADEDATE, VIEWNUM, FOLLOWNUM "
+            "FROM SELLOUT ORDER BY DATE DESC, REGION, ID"
+        ).fetchall()

@@ -11,6 +11,7 @@ from logger import setup_logger, get_logger
 import json
 import sys
 import logging
+import os
 from datetime import datetime
 from typing import List, Dict
 
@@ -356,6 +357,144 @@ def print_summary(date, stats):
     logger.info("=" * 60)
 
 
+def _format_date_price(date_price_raw):
+    """格式化 DATE_PRICE 字段，便于 Markdown 阅读。"""
+    if not date_price_raw:
+        return ""
+
+    try:
+        date_price = json.loads(date_price_raw)
+    except (TypeError, json.JSONDecodeError):
+        return str(date_price_raw)
+
+    lines = []
+    for item_date in sorted(date_price.keys()):
+        price_pair = date_price[item_date]
+        if isinstance(price_pair, list) and len(price_pair) >= 2:
+            lines.append(f"{item_date}: {price_pair[0]} / {price_pair[1]}")
+        else:
+            lines.append(f"{item_date}: {price_pair}")
+    return "<br>".join(lines)
+
+
+def _build_markdown_table(headers, rows):
+    """构造 Markdown 表格。"""
+    table_lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join(["---"] * len(headers)) + " |",
+    ]
+
+    for row in rows:
+        escaped = [str(value).replace("\n", " ").replace("|", "\\|") for value in row]
+        table_lines.append("| " + " | ".join(escaped) + " |")
+
+    return "\n".join(table_lines)
+
+
+def export_markdown_report(base_dir, date, config, stats, db):
+    """导出数据库最终状态的 Markdown 报告。"""
+    logger = get_logger()
+
+    reports_dir = os.path.join(base_dir, 'reports')
+    os.makedirs(reports_dir, exist_ok=True)
+
+    houses = db.fetchAllHouses()
+    sellout_houses = db.fetchAllSellOut()
+
+    lines = [
+        f"# 链家抓取报告 - {date}",
+        "",
+        "## 本次执行摘要",
+        "",
+        f"- 城市入口: {config['host']}",
+        f"- 抓取板块数: {len(config.get('locales', []))}",
+        f"- 户型配置: {', '.join(config.get('types', [])) or '未配置'}",
+        f"- 新增: {stats['new_count']}",
+        f"- 复活: {stats['revive_count']}",
+        f"- 变价: {stats['change_count']}",
+        f"- 售出: {stats['delete_count']}",
+        f"- 当前在售总数: {len(houses)}",
+        f"- 当前已售总数: {len(sellout_houses)}",
+        "",
+        "## 当前在售房源",
+        "",
+    ]
+
+    if houses:
+        house_rows = []
+        for item in houses:
+            house_id = item[0]
+            house_rows.append([
+                house_id,
+                item[11],
+                item[1],
+                item[2],
+                item[3],
+                item[4],
+                item[5],
+                item[6],
+                item[7],
+                item[8],
+                item[9],
+                _format_date_price(item[10]),
+                f"{config['host']}/ershoufang/{house_id}.html",
+            ])
+
+        lines.append(_build_markdown_table(
+            [
+                "ID", "区域", "小区", "户型", "面积", "朝向", "楼层",
+                "年份", "建筑", "总价", "单价", "价格历史", "链接"
+            ],
+            house_rows
+        ))
+    else:
+        lines.append("无在售房源数据。")
+
+    lines.extend([
+        "",
+        "## 已售出房源",
+        "",
+    ])
+
+    if sellout_houses:
+        sellout_rows = []
+        for item in sellout_houses:
+            house_id = item[0]
+            sellout_rows.append([
+                house_id,
+                item[12],
+                item[1],
+                item[2],
+                item[3],
+                item[4],
+                item[5],
+                item[6],
+                item[7],
+                item[8],
+                item[9],
+                item[11],
+                _format_date_price(item[10]),
+                f"{config['host']}/ershoufang/{house_id}.html",
+            ])
+
+        lines.append(_build_markdown_table(
+            [
+                "ID", "区域", "小区", "户型", "面积", "朝向", "楼层",
+                "年份", "建筑", "总价", "单价", "售出日期", "价格历史", "链接"
+            ],
+            sellout_rows
+        ))
+    else:
+        lines.append("无已售房源数据。")
+
+    report_path = os.path.join(reports_dir, f"lianjia-report-{date}.md")
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write("\n".join(lines) + "\n")
+
+    logger.info(f"Markdown 报告已导出: {report_path}")
+    return report_path
+
+
 def main():
     """主函数"""
     # 初始化日志系统
@@ -396,6 +535,13 @@ def main():
         try:
             db.conn.commit()
             logger.info("数据库提交成功")
+            export_markdown_report(
+                base_dir=os.path.abspath(os.path.join(sys.path[0], '..')),
+                date=date,
+                config=config,
+                stats=stats,
+                db=db
+            )
         except Exception as e:
             logger.error(f"⚠ 数据库提交失败: {e}", exc_info=True)
         
