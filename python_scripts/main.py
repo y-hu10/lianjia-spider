@@ -7,6 +7,7 @@
 
 from spider import Spider
 from database import Database
+from commute_service import CommuteService
 from logger import setup_logger, get_logger
 import json
 import sys
@@ -22,6 +23,10 @@ def load_config(config_path='config/config.json'):
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.loads(f.read())
+        if not config.get('baidu_ak'):
+            raise ValueError("配置缺少 baidu_ak")
+        if not config.get('workplaces'):
+            raise ValueError("配置缺少 workplaces")
         logger.info(f"配置文件加载成功: {config_path}")
         return config
     except Exception as e:
@@ -148,7 +153,7 @@ def fetch_all_data(config):
     return list(all_houses.values())
 
 
-def process_houses(data, db, config, date):
+def process_houses(data, db, config, date, commute_service):
     """
     处理房源数据：新增、变动、减少、复活
     
@@ -178,6 +183,7 @@ def process_houses(data, db, config, date):
         
         try:
             house_id = house['house_id']
+            commute_service.apply_house_commute(house)
             
             # 先查询HOUSE表
             old_data = list(db.selectHouse(house_id))
@@ -193,7 +199,7 @@ def process_houses(data, db, config, date):
                     stats['revive_list'].append(url)
                     
                     # 获取历史价格数据
-                    old_date_price = json.loads(sellout_data[0][10])  # DATE_PRICE字段
+                    old_date_price = json.loads(sellout_data[0]['DATE_PRICE'])
                     
                     # 检查价格是否有变动
                     sorted_dates = sorted(old_date_price.keys())
@@ -239,7 +245,7 @@ def process_houses(data, db, config, date):
                 
             else:
                 # 已存在的房源，检查价格变动
-                old_date_price = json.loads(old_data[0][10])  # DATE_PRICE字段（索引10）
+                old_date_price = json.loads(old_data[0]['DATE_PRICE'])
                 
                 if date not in old_date_price:
                     old_date_price[date] = [
@@ -280,21 +286,29 @@ def process_houses(data, db, config, date):
                 
                 # 移动到 SELLOUT 表
                 del_data = list(db.selectHouse(item[0]))[0]
-                db.insertSellOut({
-                    'house_id': del_data[0],
-                    'house_location': del_data[1],
-                    'house_type': del_data[2],
-                    'house_size': del_data[3],
-                    'house_towards': del_data[4],
-                    'house_flood': del_data[5],
-                    'house_year': del_data[6],
-                    'house_building': del_data[7],
-                    'house_total_price': del_data[8],
-                    'house_unit_price': del_data[9],
-                    'house_date_price': del_data[10],
+                sellout_house = {
+                    'house_id': del_data['ID'],
+                    'house_location': del_data['LOCATION'],
+                    'house_type': del_data['TYPE'],
+                    'house_size': del_data['SIZE'],
+                    'house_towards': del_data['TOWARDS'],
+                    'house_flood': del_data['FLOOD'],
+                    'house_year': del_data['YEAR'],
+                    'house_building': del_data['BUILDING'],
+                    'house_total_price': del_data['TOTAL_PRICE'],
+                    'house_unit_price': del_data['UNIT_PRICE'],
+                    'house_date_price': del_data['DATE_PRICE'],
                     'date': date,
-                    'house_region': del_data[11]
-                })
+                    'house_region': del_data['REGION']
+                }
+
+                for workplace in db.workplaces:
+                    code = workplace['code']
+                    column_prefix = f'COMMUTE_{code.upper()}'
+                    sellout_house[f'commute_{code}_driving_duration'] = del_data[f'{column_prefix}_DRIVING_DURATION']
+                    sellout_house[f'commute_{code}_transit_duration'] = del_data[f'{column_prefix}_TRANSIT_DURATION']
+
+                db.insertSellOut(sellout_house)
                 
                 db.deleteHouse(item[0])
                 logger.debug(f"  ❌ 售出房源: {item[0]}")
@@ -520,13 +534,14 @@ def main():
         
         # 初始化数据库
         logger.info("初始化数据库连接...")
-        db = Database()
+        db = Database(workplaces=config.get('workplaces'))
+        commute_service = CommuteService(db=db, config=config, logger=logger)
         
         # 获取当前日期
         date = datetime.today().strftime('%Y-%m-%d')
         
         # 处理数据
-        stats = process_houses(all_data, db, config, date)
+        stats = process_houses(all_data, db, config, date, commute_service)
         
         # 打印摘要
         print_summary(date, stats)

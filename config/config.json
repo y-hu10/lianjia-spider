@@ -1,5 +1,18 @@
 {
     "host": "https://sh.lianjia.com",
+    "baidu_ak": "pXce8cHl1x6UYKpQ3sejLJLc7ai2RgYL",
+    "workplaces": [
+        {
+            "code": "office_wife",
+            "name": "老婆的办公地",
+            "address": "上海市静安区南京西路1266号"
+        },
+        {
+            "code": "office_me",
+            "name": "我的办公地",
+            "address": "上海市徐汇区漕宝路1011号"
+        }
+    ],
     "locales": ["jingansi", "beiwaitan", "lianyang", "huamu", "yuanshen", "beicai", "biyun", "jinyang", "lujiazui", "meiyuan1", "nanmatou", "shibo", "jinqiao", "sanlin", "weifang", "yangdong", "yangjing", "yangsiqiantan", "yuqiao1", "zhangjiang", "buyecheng", "caojiadu", "daning", "jiangninglu", "nanjingxilu", "suhewan", "xizangbeilu", "linpinglu", "luxungongyuan", "sichuanbeilu", "dapuqiao", "dongjiadu", "huaihaizhonglu", "huangpubinjiang", "laoximen", "nanjingdonglu", "penglaigongyuan", "renminguangchang", "shibobinjiang", "wuliqiao", "xintiandi", "yuyuan", "anshan", "dongwaitan", "huangxinggongyuan", "kongjianglu", "wujiaochang", "zhoujiazuilu", "caohejing", "changqiao", "hengshanlu", "huadongligong", "jianguoxilu", "kangjian", "longhua", "shanghainanzhan", "tianlin", "wantiguan", "xietulu", "xuhuibinjiang", "zhiwuyuan", "gubei", "tianshan", "xinhualu", "zhenninglu", "zhongshangongyuan", "caoyang", "changfeng1", "wuning", "zhenru", "wanli", "dahua", "changshoulu", "ganquanyichuan", "guangxin", "zhongyuanliangwancheng"],
     "types": ["l3"],
     "price_ranges": [

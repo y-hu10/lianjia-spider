@@ -32,6 +32,56 @@ class SeleniumCookieHelper:
         netloc = parsed.netloc
         return f"{scheme}://{netloc}/"
 
+    def _set_cookies_via_cdp(self, url, cookies):
+        """优先通过 CDP 在首跳前写入 cookie，避免先打开主站引导页。"""
+        if not cookies:
+            return True
+
+        parsed = urlparse(url)
+        scheme = parsed.scheme or 'https'
+        host = parsed.netloc
+        origin = f"{scheme}://{host}"
+
+        self.driver.execute_cdp_cmd("Network.enable", {})
+        for key, value in cookies.items():
+            result = self.driver.execute_cdp_cmd(
+                "Network.setCookie",
+                {
+                    "name": key,
+                    "value": value,
+                    "domain": ".lianjia.com",
+                    "path": "/",
+                    "url": origin,
+                }
+            )
+            if not result.get("success", False):
+                raise RuntimeError(f"CDP 写入 cookie 失败: {key}")
+
+        return True
+
+    def _set_cookies_with_fallback(self, url, cookies):
+        """优先直接注入 cookie，失败时回退到同域引导页方案。"""
+        if not cookies:
+            return
+
+        try:
+            self._set_cookies_via_cdp(url, cookies)
+            self.logger.info("✓ 已预注入 Cookie，直接打开目标页面")
+            return
+        except Exception as exc:
+            self.logger.warning(f"⚠️ 预注入 Cookie 失败，回退到引导页方案: {exc}")
+
+        bootstrap_url = self._get_cookie_bootstrap_url(url)
+        self.driver.get(bootstrap_url)
+        for key, value in cookies.items():
+            self.driver.add_cookie({
+                "name": key,
+                "value": value,
+                "domain": ".lianjia.com",
+                "path": "/",
+            })
+        self.logger.info("✓ 已在同域引导页注入 Cookie")
+
     def _is_blocked_page(self, page_source, current_url):
         """判断当前页面是否仍处于验证/拦截状态。"""
         blocked_markers = (
@@ -182,11 +232,7 @@ class SeleniumCookieHelper:
                 renderer="Intel Iris OpenGL Engine",
                 fix_hairline=True)
 
-            bootstrap_url = self._get_cookie_bootstrap_url(url)
-            self.driver.get(bootstrap_url)
-            for key, value in current_cookies.items():
-                self.driver.add_cookie({"name": key, "value": value, "domain": ".lianjia.com", "path": "/"})
-            
+            self._set_cookies_with_fallback(url, current_cookies or {})
             self.logger.info(f"✓ 浏览器已启动，正在访问: {url}")
             self.driver.get(url)
             
